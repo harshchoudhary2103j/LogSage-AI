@@ -2,7 +2,7 @@ package com.logsage.backend.controller;
 
 import com.logsage.backend.dto.LogEntry;
 import com.logsage.backend.dto.LogIngestionResponse;
-import com.logsage.backend.service.LogService;
+import com.logsage.backend.kafka.LogProducer;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,7 +15,9 @@ import java.util.List;
 /**
  * REST controller for log ingestion.
  *
- * CHANGE (Fix #7): Returns typed LogIngestionResponse instead of raw Map.
+ * CHANGED FOR KAFKA: Instead of storing logs directly, we publish
+ * them to Kafka. The response is now 202 Accepted (not 201 Created),
+ * signaling that logs are queued for asynchronous processing.
  */
 @Slf4j
 @RestController
@@ -23,28 +25,22 @@ import java.util.List;
 @RequiredArgsConstructor
 public class LogController {
 
-    private final LogService logService;
+    private final LogProducer logProducer;
 
     /**
-     * Accept and store a batch of log entries.
+     * Accept a batch of log entries and publish to Kafka.
+     *
+     * Returns 202 Accepted — logs are queued, not yet processed.
      */
     @PostMapping
     public ResponseEntity<LogIngestionResponse> ingestLogs(
             @Valid @RequestBody List<@Valid LogEntry> logs) {
-        log.info("Received {} log entries for ingestion", logs.size());
+        log.info("Received {} log entries — publishing to Kafka", logs.size());
 
-        int stored = logService.storeLogs(logs);
+        logProducer.sendLogs(logs);
 
         return ResponseEntity
-                .status(HttpStatus.CREATED)
-                .body(LogIngestionResponse.success(stored));
-    }
-
-    /**
-     * Retrieve all stored logs (useful for debugging).
-     */
-    @GetMapping
-    public ResponseEntity<List<LogEntry>> getAllLogs() {
-        return ResponseEntity.ok(logService.getAllLogs());
+                .status(HttpStatus.ACCEPTED)
+                .body(new LogIngestionResponse("Logs queued for processing", logs.size()));
     }
 }

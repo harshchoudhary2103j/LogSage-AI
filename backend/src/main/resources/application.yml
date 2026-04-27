@@ -6,12 +6,26 @@ spring:
   application:
     name: LogSage-AI
 
+  # Kafka Configuration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Wait for leader acknowledgment (good balance of safety + speed)
+      acks: 1
+    consumer:
+      group-id: logsage-processors
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Start from earliest message if no committed offset exists
+      auto-offset-reset: earliest
+
 # Server Configuration
 server:
   port: 8081
 
 # AI / LLM Configuration
-# ALL values sourced from environment variables — no hardcoded secrets.
 # Set AI_API_KEY before running: $env:AI_API_KEY = "sk-..."
 ai:
   api:
@@ -36,6 +50,7 @@ logging:
   level:
     root: INFO
     com.logsage: DEBUG
+    org.apache.kafka: WARN
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
 
