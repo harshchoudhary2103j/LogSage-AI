@@ -47,18 +47,18 @@ Client → POST /api/analyze → AiClient → OpenAI → Response
 
 **Limitation:** Log ingestion and AI analysis are coupled. Slow AI responses block the user.
 
-### Phase 2 (Current) — Event-Driven with Kafka
+### Phase 2 (Stage 2) — Event-Driven with Multi-Topic Pipeline
 
-Kafka decouples ingestion from processing. The user gets an instant acknowledgment while analysis happens asynchronously.
+Kafka strictly decouples all components. The user gets an instant acknowledgment. Log storage happens instantly, and AI analysis is routed to a dedicated specialized worker.
 
 ```
-┌─────────┐     ┌──────────────┐     ┌─────────────────┐     ┌──────────┐
-│  Client  │────▶│ POST /api/logs│────▶│  Kafka Producer  │────▶│  Kafka   │
-│ (Postman │     │  LogController│     │  (LogProducer)   │     │ log-     │
-│  or UI)  │     │  Returns 202 │     │                  │     │ entries  │
-└─────────┘     └──────────────┘     └─────────────────┘     └────┬─────┘
-                                                                   │
-                                              ┌────────────────────┘
+┌─────────┐     ┌──────────────┐     ┌─────────────────┐     ┌────────────────┐
+│  Client  │────▶│ POST /api/logs│────▶│  Kafka Producer  │────▶│  Kafka Topic:   │
+│ (Postman │     │  LogController│     │  (LogProducer)   │     │  log-entries    │
+│  or UI)  │     │  Returns 202 │     │                  │     │                │
+└─────────┘     └──────────────┘     └─────────────────┘     └───────┬────────┘
+                                                                     │
+                                              ┌──────────────────────┘
                                               ▼
                                      ┌─────────────────┐
                                      │  Kafka Consumer  │
@@ -73,16 +73,28 @@ Kafka decouples ingestion from processing. The user gets an instant acknowledgme
                         └──────────┘   └─────┬─────┘   └────────────┘
                                              │
                                              ▼
-                                     ┌───────────────┐
-                                     │   AiClient     │
-                                     │ (OpenAI API)   │
-                                     └───────┬───────┘
-                                             │
-                                             ▼
-                                     ┌───────────────┐     ┌─────────────┐
-                                     │AnalysisResult  │────▶│GET /api/    │
-                                     │    Store       │     │  results    │
-                                     └───────────────┘     └─────────────┘
+                                     ┌─────────────────────────┐
+                                     │      Kafka Topic:       │
+                                     │    analysis-requests    │
+                                     └───────────┬─────────────┘
+                                                 │
+                                                 ▼
+                                     ┌─────────────────────────┐
+                                     │     AnalysisWorker      │
+                                     │ (Consumes & Calls API)  │
+                                     └───────────┬─────────────┘
+                                                 │
+                                                 ▼
+                                         ┌───────────────┐
+                                         │   AiClient     │
+                                         │ (OpenAI API)   │
+                                         └───────┬───────┘
+                                                 │
+                                                 ▼
+                                         ┌───────────────┐     ┌─────────────┐
+                                         │AnalysisResult  │────▶│GET /api/    │
+                                         │    Store       │     │  results    │
+                                         └───────────────┘     └─────────────┘
 ```
 
 ---
@@ -95,15 +107,15 @@ Kafka decouples ingestion from processing. The user gets an instant acknowledgme
 - Immediate `202 Accepted` response — non-blocking ingestion
 
 ### AI-Powered Analysis
-- ERROR-level logs automatically trigger LLM analysis via Kafka consumer
+- ERROR-level logs are routed to an `analysis-requests` topic
+- A dedicated `AnalysisWorker` limits concurrent AI requests to safely manage rate-limits
 - Structured output: `error_type`, `root_cause`, `severity` (LOW/MEDIUM/HIGH), `fix_suggestion`
 - Safe JSON parsing with markdown code block stripping
 - Configurable connection and read timeouts (5s / 30s)
 
 ### Architecture & Reliability
-- Layered architecture: Controller → Service → Client
-- Async AI calls isolated on a dedicated bounded thread pool
-- Rate limiting (10 req/min per IP on `/analyze`)
+- Strict Single-Responsibility Principle: `LogConsumer` only stores and routes, `AnalysisWorker` handles expensive AI calls
+- Rate limiting (10 req/min per IP on `/analyze` fallback)
 - Bounded in-memory stores with LRU eviction (10K logs, 100 results/service)
 - Global exception handling (400, 429, 503 responses)
 - Input validation with Jakarta Bean Validation
@@ -111,9 +123,10 @@ Kafka decouples ingestion from processing. The user gets an instant acknowledgme
 
 ### Kafka Integration
 - KRaft-mode Kafka via Docker (no Zookeeper dependency)
-- Single topic `log-entries` with automatic creation
+- Multi-topic architecture: `log-entries` and `analysis-requests`
+- Consumer groups: isolated groups (`logsage-log-processors` and `logsage-ai-workers`)
 - String serialization with manual JSON mapping (explicit, debuggable)
-- Consumer group `logsage-processors` with earliest offset reset
+- Automatic topic creation
 
 ---
 
@@ -140,27 +153,29 @@ Kafka decouples ingestion from processing. The user gets an instant acknowledgme
 1. Client sends POST /api/logs with JSON array of log entries
 2. LogController validates input → passes to LogProducer
 3. LogProducer publishes each entry to Kafka [log-entries] topic
-   - Key: service name (ensures ordering per service)
-   - Value: serialized JSON
 4. HTTP response returns immediately: 202 Accepted
 
-   ─── async boundary ───
+   ─── async boundary 1 ───
 
-5. LogConsumer picks up messages from Kafka
+5. LogConsumer picks up messages from [log-entries]
 6. ALL logs are stored in InMemoryLogStore
 7. Consumer checks log level:
-   - INFO/WARN → stored only
-   - ERROR → triggers AI analysis
-8. AiClient sends ERROR log to OpenAI with DevOps expert system prompt
-9. OpenAI returns structured JSON:
+   - INFO/WARN → skips further routing
+   - ERROR → publishes to Kafka [analysis-requests] topic
+
+   ─── async boundary 2 ───
+
+8. AnalysisWorker picks up messages from [analysis-requests]
+9. Calls AiClient to send the ERROR log to OpenAI with DevOps expert system prompt
+10. OpenAI returns structured JSON:
    {
-     "error_type": "NullPointerException",
-     "root_cause": "token is null",
+     "error_type": "ConnectionRefusedException",
+     "root_cause": "gateway timeout",
      "severity": "HIGH",
-     "fix_suggestion": "Add null check before token usage in UserService.java:42"
+     "fix_suggestion": "Check the network connection to the payment gateway"
    }
-10. Result stored in AnalysisResultStore
-11. Client polls GET /api/results to retrieve analysis
+11. Result stored in AnalysisResultStore
+12. Client polls GET /api/results to retrieve analysis
 ```
 
 ---
@@ -203,8 +218,8 @@ $env:AI_API_KEY = "sk-your-key-here"
 
 **Expected startup log:**
 ```
-Tomcat started on port 8081
 logsage-processors: partitions assigned: [log-entries-0]
+logsage-ai-workers: partitions assigned: [analysis-requests-0]
 ```
 
 ### 3. Start Frontend (optional)
@@ -328,19 +343,20 @@ docker run -d -p 8080:8080 \
 ```
 
 Open `http://localhost:8080` to:
-- View messages in `log-entries` topic
-- Monitor consumer group `logsage-processors` lag
+- View messages in `log-entries` and `analysis-requests` topics
+- Monitor consumer groups `logsage-processors` and `logsage-ai-workers` lag
 - Check partition offsets
 
 ---
 
 ## 🧠 Design Decisions
 
+### Why separate LogConsumer and AnalysisWorker? (Stage 2)
+In Stage 1, a single consumer handled DB writes and slow AI calls. If OpenAI's API was slow, it halted log ingestion completely.
+By moving AI calls to a separate `AnalysisWorker` listening on a dedicated topic (`analysis-requests`), log storage remains lightning-fast, and the AI workers can scale horizontally entirely independent of ingestion logic. Focus on Single-Responsibility.
+
 ### Why Kafka?
 Log ingestion should be fast and non-blocking. AI analysis takes 5–30 seconds per call. Without Kafka, each log submission would wait for the AI response. Kafka decouples these — the producer returns instantly, and the consumer processes at its own pace.
-
-### Why filter only ERROR logs for analysis?
-LLM API calls are expensive (tokens cost money) and slow. Analyzing every INFO log would be wasteful. ERROR logs carry the most actionable signal. WARN support can be added later as a configurable threshold.
 
 ### Why structured AI output?
 Free-text AI responses are hard to display and impossible to aggregate. By constraining the LLM to return a fixed JSON schema (`error_type`, `root_cause`, `severity`, `fix_suggestion`), we can:
@@ -357,18 +373,16 @@ Phase 1/2 scope decision. A database adds deployment complexity. Bounded in-memo
 
 | Limitation | Impact | Planned Fix |
 |-----------|--------|-------------|
-| Single Kafka topic | No separation between log types | Multi-topic pipeline |
 | No retry mechanism | Failed AI calls are logged and skipped | Dead-letter topic + exponential backoff |
 | In-memory storage | Data lost on restart | PostgreSQL persistence |
 | No authentication | API is open | Spring Security + JWT |
-| Single consumer | Limited throughput | Partitioned topic + consumer group scaling |
+| Single partitions | Limited overall throughput | Increase partitions + parallel scaling |
 | Polling for results | Client must poll GET /api/results | WebSocket push notifications |
 
 ---
 
 ## 🔮 Future Improvements
 
-- **Multi-topic Kafka pipeline** — Separate topics for `analysis-requests` and `analysis-results` with dedicated workers
 - **PostgreSQL persistence** — Store logs and AI analysis results durably with JPA
 - **Redis caching** — Cache recent analysis results to reduce duplicate AI calls
 - **WebSocket result delivery** — Push analysis results to the UI in real-time instead of polling
@@ -416,7 +430,8 @@ LogSage AI/
 │       ├── filter/
 │       │   └── RateLimitFilter.java       # Per-IP rate limiting
 │       ├── kafka/
-│       │   ├── LogConsumer.java           # Consumes + filters + analyzes
+│       │   ├── AnalysisWorker.java        # Analyzes via 'analysis-requests'
+│       │   ├── LogConsumer.java           # Consumes logs + routes to worker
 │       │   └── LogProducer.java           # Publishes to Kafka
 │       ├── service/
 │       │   ├── AnalysisService.java       # @Async analysis orchestration

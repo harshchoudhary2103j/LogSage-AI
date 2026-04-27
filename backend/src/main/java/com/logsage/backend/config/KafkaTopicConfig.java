@@ -8,17 +8,27 @@ import org.springframework.kafka.config.TopicBuilder;
 /**
  * Kafka topic configuration.
  *
- * Creates the 'log-entries' topic on startup if it doesn't exist.
- * 1 partition + 1 replica — kept simple for Stage 1 debugging.
+ * Stage 2: Two topics
+ * - log-entries: raw log ingestion
+ * - analysis-requests: ERROR logs forwarded for AI analysis
  */
 @Configuration
 public class KafkaTopicConfig {
 
     public static final String LOG_ENTRIES_TOPIC = "log-entries";
+    public static final String ANALYSIS_REQUESTS_TOPIC = "analysis-requests";
 
     @Bean
     public NewTopic logEntriesTopic() {
         return TopicBuilder.name(LOG_ENTRIES_TOPIC)
+                .partitions(1)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic analysisRequestsTopic() {
+        return TopicBuilder.name(ANALYSIS_REQUESTS_TOPIC)
                 .partitions(1)
                 .replicas(1)
                 .build();

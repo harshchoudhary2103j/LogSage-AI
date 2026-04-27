@@ -1,32 +1,26 @@
 package com.logsage.backend.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.logsage.backend.client.AiClient;
 import com.logsage.backend.config.KafkaTopicConfig;
-import com.logsage.backend.dto.AnalysisResponse;
 import com.logsage.backend.dto.LogEntry;
 import com.logsage.backend.dto.LogLevel;
-import com.logsage.backend.store.AnalysisResultStore;
 import com.logsage.backend.store.InMemoryLogStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
-
-import java.util.List;
 
 /**
  * Consumes log entries from the Kafka 'log-entries' topic.
  *
- * Processing pipeline:
- * 1. Deserialize the JSON message → LogEntry
- * 2. Store ALL logs in InMemoryLogStore (for querying)
- * 3. Filter: only ERROR logs trigger AI analysis
- * 4. Call existing AiClient.analyze() (REUSED — not rewritten)
- * 5. Store the analysis result in AnalysisResultStore
+ * Stage 2 change: This consumer NO LONGER calls AiClient directly.
+ * Instead it:
+ * 1. Stores ALL logs in InMemoryLogStore
+ * 2. Forwards ERROR logs to the 'analysis-requests' topic
  *
- * This consumer runs on its own thread (managed by Spring Kafka),
- * completely decoupled from HTTP request threads.
+ * The AI call is now handled by AnalysisWorker — a separate consumer.
+ * This follows single responsibility: LogConsumer = store + route.
  */
 @Slf4j
 @Component
@@ -34,13 +28,12 @@ import java.util.List;
 public class LogConsumer {
 
     private final ObjectMapper objectMapper;
-    private final AiClient aiClient;
     private final InMemoryLogStore logStore;
-    private final AnalysisResultStore resultStore;
+    private final KafkaTemplate<String, String> kafkaTemplate;
 
     @KafkaListener(
             topics = KafkaTopicConfig.LOG_ENTRIES_TOPIC,
-            groupId = "logsage-processors"
+            groupId = "logsage-log-processors"
     )
     public void consume(String message) {
         try {
@@ -51,36 +44,20 @@ public class LogConsumer {
             // Step 1: Store every log
             logStore.save(entry);
 
-            // Step 2: Only analyze ERROR logs
+            // Step 2: Forward ERROR logs to analysis-requests topic
             if (entry.getLevel() == LogLevel.ERROR) {
-                log.info("ERROR log detected — triggering AI analysis for service: {}",
+                log.info("ERROR log detected — forwarding to analysis-requests [service={}]",
                         entry.getService());
-                analyzeErrorLog(entry);
+
+                kafkaTemplate.send(
+                        KafkaTopicConfig.ANALYSIS_REQUESTS_TOPIC,
+                        entry.getService(),  // key = service name
+                        message              // forward the same JSON
+                );
             }
 
         } catch (Exception e) {
-            // Log and skip bad messages (don't block the consumer)
             log.error("Failed to process Kafka message: {}", e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Call the existing AiClient to analyze an ERROR log.
-     * Wraps the single entry in a list (AiClient expects List<LogEntry>).
-     */
-    private void analyzeErrorLog(LogEntry entry) {
-        try {
-            AnalysisResponse response = aiClient.analyze(List.of(entry));
-
-            resultStore.save(entry.getService(), response);
-
-            log.info("AI analysis complete [service={}, severity={}, error_type={}]",
-                    entry.getService(), response.severity(), response.errorType());
-
-        } catch (Exception e) {
-            log.error("AI analysis failed for service {}: {}",
-                    entry.getService(), e.getMessage());
-            // Don't rethrow — consumer continues with next message
         }
     }
 }
