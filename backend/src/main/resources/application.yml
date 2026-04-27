@@ -1,0 +1,43 @@
+# ============================================
+# LogSage AI — Application Configuration
+# ============================================
+
+spring:
+  application:
+    name: LogSage-AI
+
+# Server Configuration
+server:
+  port: 8081
+
+# AI / LLM Configuration
+# ALL values sourced from environment variables — no hardcoded secrets.
+# Set AI_API_KEY before running: $env:AI_API_KEY = "sk-..."
+ai:
+  api:
+    key: ${AI_API_KEY:}
+    base-url: ${AI_API_BASE_URL:https://api.openai.com/v1}
+    model: ${AI_API_MODEL:gpt-3.5-turbo}
+    connect-timeout-ms: ${AI_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${AI_READ_TIMEOUT_MS:30000}
+    max-response-size-bytes: ${AI_MAX_RESPONSE_SIZE:1048576}
+
+# In-Memory Log Store
+log-store:
+  max-capacity: ${LOG_STORE_MAX_CAPACITY:10000}
+
+# Rate Limiting (per IP, for /analyze endpoint)
+rate-limit:
+  requests-per-window: ${RATE_LIMIT_REQUESTS:10}
+  window-ms: ${RATE_LIMIT_WINDOW_MS:60000}
+
+# Logging
+logging:
+  level:
+    root: INFO
+    com.logsage: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# Async request timeout for Spring MVC
+spring.mvc.async.request-timeout: 35000
