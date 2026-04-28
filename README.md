@@ -53,7 +53,7 @@ Kafka strictly decouples all components. The user gets an instant acknowledgment
 
 ### Phase 3 (Stage 3) — Fault-Tolerant, Production-Ready Pipeline
 
-Added PostgreSQL persistence, idempotency, retry mechanisms, and a Dead Letter Topic (DLT) for complete reliability.
+Added PostgreSQL persistence, idempotency, retry mechanisms, parallel processing (3 partitions), and a Dead Letter Topic (DLT) for complete reliability and horizontal scalability.
 
 ```mermaid
 graph TD
@@ -104,6 +104,8 @@ graph TD
 - Multi-topic architecture: `log-entries`, `analysis-requests`, and `analysis-dlt`
 - **Fault Tolerance**: 3x exponential backoff retry for transient AI failures
 - **Dead Letter Topic (DLT)**: Unresolvable messages are routed to `analysis-dlt` instead of being lost
+- **Parallel Processing**: All topics have 3 partitions. Listener container factories use `concurrency(3)` to spin up 3 processing threads per topic, dynamically distributed within the consumer groups.
+- **Ordered Processing**: Service names are used as partition keys, guaranteeing that logs from the same service land in the same partition and are processed sequentially.
 - Consumer groups: isolated groups (`logsage-log-processors` and `logsage-ai-workers`)
 - String serialization with manual JSON mapping (explicit, debuggable)
 - Automatic topic creation
@@ -360,7 +362,6 @@ Phase 1/2 scope decision. A database adds deployment complexity. Bounded in-memo
 | Limitation | Impact | Planned Fix |
 |-----------|--------|-------------|
 | No authentication | API is open | Spring Security + JWT |
-| Single partitions | Limited overall throughput | Increase partitions + parallel scaling |
 | Polling for results | Client must poll GET /api/results | WebSocket push notifications |
 
 ---
