@@ -168,9 +168,9 @@ graph TD
 ### Prerequisites
 - Java 21+
 - Node.js 18+ (for frontend)
-- Docker Desktop (for Kafka)
+- Docker Desktop (for Kafka & PostgreSQL)
 
-### 1. Start Kafka
+### 1. Start Infrastructure (Kafka & PostgreSQL)
 
 ```bash
 cd "LogSage AI"
@@ -180,7 +180,7 @@ docker-compose up -d
 Verify:
 ```bash
 docker ps
-# Should show: logsage-kafka with status "Up"
+# Should show: logsage-kafka, logsage-postgres, and logsage-kafka-ui with status "Up"
 ```
 
 ### 2. Start Backend
@@ -222,7 +222,10 @@ npm run dev
 | `AI_API_BASE_URL` | `https://api.openai.com/v1` | LLM API base URL |
 | `AI_API_MODEL` | `gpt-3.5-turbo` | Model to use |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker address |
-| `LOG_STORE_MAX_CAPACITY` | `10000` | Max log entries in memory |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host |
+| `POSTGRES_PORT` | `5435` | PostgreSQL port |
+| `POSTGRES_USER` | `logsage` | PostgreSQL user |
+| `POSTGRES_PASSWORD` | `logsage` | PostgreSQL password |
 | `RATE_LIMIT_REQUESTS` | `10` | Max analysis requests per minute per IP |
 
 ---
