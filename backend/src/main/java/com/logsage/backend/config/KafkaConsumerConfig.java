@@ -56,6 +56,7 @@ public class KafkaConsumerConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setConcurrency(3);
         return factory;
     }
 
@@ -83,6 +84,7 @@ public class KafkaConsumerConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setConcurrency(3);
 
         // DLT recoverer: routes failed messages to analysis-dlt
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(

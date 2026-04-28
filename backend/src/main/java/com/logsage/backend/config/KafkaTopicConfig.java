@@ -23,7 +23,7 @@ public class KafkaTopicConfig {
     @Bean
     public NewTopic logEntriesTopic() {
         return TopicBuilder.name(LOG_ENTRIES_TOPIC)
-                .partitions(1)
+                .partitions(3)
                 .replicas(1)
                 .build();
     }
@@ -31,7 +31,7 @@ public class KafkaTopicConfig {
     @Bean
     public NewTopic analysisRequestsTopic() {
         return TopicBuilder.name(ANALYSIS_REQUESTS_TOPIC)
-                .partitions(1)
+                .partitions(3)
                 .replicas(1)
                 .build();
     }
@@ -39,7 +39,7 @@ public class KafkaTopicConfig {
     @Bean
     public NewTopic analysisDltTopic() {
         return TopicBuilder.name(ANALYSIS_DLT_TOPIC)
-                .partitions(1)
+                .partitions(3)
                 .replicas(1)
                 .build();
     }
