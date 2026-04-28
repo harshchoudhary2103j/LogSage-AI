@@ -1,5 +1,5 @@
 # ============================================
-# LogSage AI — Docker Compose (Kafka with KRaft)
+# LogSage AI — Docker Compose (Kafka + PostgreSQL)
 # ============================================
 # No Zookeeper needed — KRaft mode is Kafka's built-in consensus.
 #
@@ -44,3 +44,19 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092  # internal Docker network
     depends_on:
       - kafka
+
+  # Stage 3: PostgreSQL for persistent storage
+  postgres:
+    image: postgres:16-alpine
+    container_name: logsage-postgres
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_DB: logsage
+      POSTGRES_USER: logsage
+      POSTGRES_PASSWORD: logsage
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

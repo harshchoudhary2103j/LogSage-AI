@@ -51,50 +51,27 @@ Client → POST /api/analyze → AiClient → OpenAI → Response
 
 Kafka strictly decouples all components. The user gets an instant acknowledgment. Log storage happens instantly, and AI analysis is routed to a dedicated specialized worker.
 
-```
-┌─────────┐     ┌──────────────┐     ┌─────────────────┐     ┌────────────────┐
-│  Client  │────▶│ POST /api/logs│────▶│  Kafka Producer  │────▶│  Kafka Topic:   │
-│ (Postman │     │  LogController│     │  (LogProducer)   │     │  log-entries    │
-│  or UI)  │     │  Returns 202 │     │                  │     │                │
-└─────────┘     └──────────────┘     └─────────────────┘     └───────┬────────┘
-                                                                     │
-                                              ┌──────────────────────┘
-                                              ▼
-                                     ┌─────────────────┐
-                                     │  Kafka Consumer  │
-                                     │  (LogConsumer)   │
-                                     └────────┬────────┘
-                                              │
-                              ┌───────────────┼───────────────┐
-                              ▼               ▼               ▼
-                        ┌──────────┐   ┌───────────┐   ┌────────────┐
-                        │ Store ALL│   │ Filter for │   │  Skip INFO │
-                        │   logs   │   │  ERROR lvl │   │  & WARN    │
-                        └──────────┘   └─────┬─────┘   └────────────┘
-                                             │
-                                             ▼
-                                     ┌─────────────────────────┐
-                                     │      Kafka Topic:       │
-                                     │    analysis-requests    │
-                                     └───────────┬─────────────┘
-                                                 │
-                                                 ▼
-                                     ┌─────────────────────────┐
-                                     │     AnalysisWorker      │
-                                     │ (Consumes & Calls API)  │
-                                     └───────────┬─────────────┘
-                                                 │
-                                                 ▼
-                                         ┌───────────────┐
-                                         │   AiClient     │
-                                         │ (OpenAI API)   │
-                                         └───────┬───────┘
-                                                 │
-                                                 ▼
-                                         ┌───────────────┐     ┌─────────────┐
-                                         │AnalysisResult  │────▶│GET /api/    │
-                                         │    Store       │     │  results    │
-                                         └───────────────┘     └─────────────┘
+### Phase 3 (Stage 3) — Fault-Tolerant, Production-Ready Pipeline
+
+Added PostgreSQL persistence, idempotency, retry mechanisms, and a Dead Letter Topic (DLT) for complete reliability.
+
+```mermaid
+graph TD
+    A["POST /api/logs"] --> B["LogProducer"]
+    B --> C["log-entries topic"]
+    C --> D["LogConsumer"]
+    D --> E["PostgreSQL: logs table"]
+    D -->|"ERROR logs"| F["analysis-requests topic"]
+    F --> G["AnalysisWorker"]
+    G -->|"retry 3x with backoff"| H["AiClient (LLM)"]
+    G -->|"success"| I["PostgreSQL: analysis_results table"]
+    G -->|"all retries exhausted"| J["analysis-dlt topic"]
+    G -.->|"check before processing"| K["Idempotency: processed_messages table"]
+
+    style J fill:#ff6b6b,color:#fff
+    style K fill:#ffd93d,color:#333
+    style E fill:#4ecdc4,color:#fff
+    style I fill:#4ecdc4,color:#fff
 ```
 
 ---
@@ -116,14 +93,17 @@ Kafka strictly decouples all components. The user gets an instant acknowledgment
 ### Architecture & Reliability
 - Strict Single-Responsibility Principle: `LogConsumer` only stores and routes, `AnalysisWorker` handles expensive AI calls
 - Rate limiting (10 req/min per IP on `/analyze` fallback)
-- Bounded in-memory stores with LRU eviction (10K logs, 100 results/service)
+- **PostgreSQL Persistence**: Fully replaces in-memory stores using Spring Data JPA
+- **Idempotency**: Prevents duplicate processing of logs using SHA-256 hashing
 - Global exception handling (400, 429, 503 responses)
 - Input validation with Jakarta Bean Validation
 - Immutable DTOs using Java records
 
 ### Kafka Integration
 - KRaft-mode Kafka via Docker (no Zookeeper dependency)
-- Multi-topic architecture: `log-entries` and `analysis-requests`
+- Multi-topic architecture: `log-entries`, `analysis-requests`, and `analysis-dlt`
+- **Fault Tolerance**: 3x exponential backoff retry for transient AI failures
+- **Dead Letter Topic (DLT)**: Unresolvable messages are routed to `analysis-dlt` instead of being lost
 - Consumer groups: isolated groups (`logsage-log-processors` and `logsage-ai-workers`)
 - String serialization with manual JSON mapping (explicit, debuggable)
 - Automatic topic creation
@@ -137,6 +117,7 @@ Kafka strictly decouples all components. The user gets an instant acknowledgment
 | Backend | Java 21, Spring Boot 4 |
 | Frontend | React 18, Vite 5 |
 | Messaging | Apache Kafka 3.9 (KRaft mode) |
+| Database | PostgreSQL 16 |
 | AI | OpenAI Chat Completions API (GPT-3.5 Turbo) |
 | HTTP Client | Spring WebFlux WebClient |
 | Containerization | Docker, Docker Compose |
@@ -158,7 +139,7 @@ Kafka strictly decouples all components. The user gets an instant acknowledgment
    ─── async boundary 1 ───
 
 5. LogConsumer picks up messages from [log-entries]
-6. ALL logs are stored in InMemoryLogStore
+6. ALL logs are stored in PostgreSQL
 7. Consumer checks log level:
    - INFO/WARN → skips further routing
    - ERROR → publishes to Kafka [analysis-requests] topic
@@ -166,16 +147,18 @@ Kafka strictly decouples all components. The user gets an instant acknowledgment
    ─── async boundary 2 ───
 
 8. AnalysisWorker picks up messages from [analysis-requests]
-9. Calls AiClient to send the ERROR log to OpenAI with DevOps expert system prompt
-10. OpenAI returns structured JSON:
+9. Idempotency check: hashes log entry and skips if already processed
+10. Calls AiClient to send the ERROR log to OpenAI with DevOps expert system prompt
+11. If AiClient fails, Spring Kafka retries 3x with exponential backoff. If all fail, routes to [analysis-dlt]
+12. OpenAI returns structured JSON:
    {
      "error_type": "ConnectionRefusedException",
      "root_cause": "gateway timeout",
      "severity": "HIGH",
      "fix_suggestion": "Check the network connection to the payment gateway"
    }
-11. Result stored in AnalysisResultStore
-12. Client polls GET /api/results to retrieve analysis
+13. Result stored in PostgreSQL alongside the idempotency marker
+14. Client polls GET /api/results to retrieve analysis
 ```
 
 ---
@@ -373,8 +356,6 @@ Phase 1/2 scope decision. A database adds deployment complexity. Bounded in-memo
 
 | Limitation | Impact | Planned Fix |
 |-----------|--------|-------------|
-| No retry mechanism | Failed AI calls are logged and skipped | Dead-letter topic + exponential backoff |
-| In-memory storage | Data lost on restart | PostgreSQL persistence |
 | No authentication | API is open | Spring Security + JWT |
 | Single partitions | Limited overall throughput | Increase partitions + parallel scaling |
 | Polling for results | Client must poll GET /api/results | WebSocket push notifications |
@@ -383,10 +364,8 @@ Phase 1/2 scope decision. A database adds deployment complexity. Bounded in-memo
 
 ## 🔮 Future Improvements
 
-- **PostgreSQL persistence** — Store logs and AI analysis results durably with JPA
 - **Redis caching** — Cache recent analysis results to reduce duplicate AI calls
 - **WebSocket result delivery** — Push analysis results to the UI in real-time instead of polling
-- **Dead-letter queue** — Route failed messages to a DLT for investigation and replay
 - **Multi-agent AI analysis** — Specialized agents for different error categories (DB errors, auth failures, infra issues)
 - **Containerized deployment** — Dockerfile + docker-compose for the full stack (Kafka + Backend + Frontend)
 - **Alerting** — Trigger notifications (Slack, email) for HIGH severity incidents
@@ -410,6 +389,7 @@ LogSage AI/
 │       │   ├── AsyncConfig.java           # Bounded AI thread pool
 │       │   ├── CorsConfig.java
 │       │   ├── JacksonConfig.java
+│       │   ├── KafkaConsumerConfig.java   # Retry + DLT error handling
 │       │   ├── KafkaTopicConfig.java      # Topic auto-creation
 │       │   └── WebClientConfig.java       # HTTP client + timeouts
 │       ├── controller/
@@ -423,6 +403,10 @@ LogSage AI/
 │       │   ├── LogEntry.java
 │       │   ├── LogIngestionResponse.java  # Java record
 │       │   └── LogLevel.java
+│       ├── entity/
+│       │   ├── AnalysisResultEntity.java  # JPA entity
+│       │   ├── LogEntryEntity.java        # JPA entity
+│       │   └── ProcessedMessageEntity.java# Idempotency marker
 │       ├── exception/
 │       │   ├── AiAnalysisException.java
 │       │   ├── GlobalExceptionHandler.java
@@ -433,12 +417,13 @@ LogSage AI/
 │       │   ├── AnalysisWorker.java        # Analyzes via 'analysis-requests'
 │       │   ├── LogConsumer.java           # Consumes logs + routes to worker
 │       │   └── LogProducer.java           # Publishes to Kafka
-│       ├── service/
-│       │   ├── AnalysisService.java       # @Async analysis orchestration
-│       │   └── LogService.java
-│       └── store/
-│           ├── AnalysisResultStore.java   # AI results (bounded)
-│           └── InMemoryLogStore.java      # Log storage (bounded, LRU)
+│       ├── repository/
+│       │   ├── AnalysisResultRepository.java
+│       │   ├── LogEntryRepository.java
+│       │   └── ProcessedMessageRepository.java
+│       └── service/
+│           ├── AnalysisService.java       # @Async analysis orchestration
+│           └── LogService.java
 └── frontend/
     └── src/
         ├── App.jsx

@@ -6,6 +6,22 @@ spring:
   application:
     name: LogSage-AI
 
+  # PostgreSQL DataSource (Stage 3)
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5435}/logsage
+    username: ${POSTGRES_USER:logsage}
+    password: ${POSTGRES_PASSWORD:logsage}
+    driver-class-name: org.postgresql.Driver
+
+  # JPA / Hibernate (Stage 3)
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
   # Kafka Configuration
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
@@ -20,6 +36,10 @@ spring:
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # Start from earliest message if no committed offset exists
       auto-offset-reset: earliest
+      # Stage 3: Disable auto-commit — required for retry/DLT to work.
+      # With auto-commit, Kafka marks messages as consumed before processing
+      # completes, so retries would never fire.
+      enable-auto-commit: false
 
 # Server Configuration
 server:
@@ -35,10 +55,6 @@ ai:
     connect-timeout-ms: ${AI_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${AI_READ_TIMEOUT_MS:30000}
     max-response-size-bytes: ${AI_MAX_RESPONSE_SIZE:1048576}
-
-# In-Memory Log Store
-log-store:
-  max-capacity: ${LOG_STORE_MAX_CAPACITY:10000}
 
 # Rate Limiting (per IP, for /analyze endpoint)
 rate-limit:

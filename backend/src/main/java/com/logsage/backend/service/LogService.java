@@ -1,7 +1,8 @@
 package com.logsage.backend.service;
 
 import com.logsage.backend.dto.LogEntry;
-import com.logsage.backend.store.InMemoryLogStore;
+import com.logsage.backend.entity.LogEntryEntity;
+import com.logsage.backend.repository.LogEntryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -9,39 +10,37 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Service layer for log ingestion and retrieval.
- * Delegates storage to InMemoryLogStore.
+ * Service layer for log retrieval.
+ *
+ * Stage 3: Delegates to LogEntryRepository (PostgreSQL) instead of InMemoryLogStore.
+ * Note: Log storage is now handled by LogConsumer (Kafka consumer → DB).
+ * This service provides the query API for REST endpoints.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class LogService {
 
-    private final InMemoryLogStore logStore;
+    private final LogEntryRepository logEntryRepository;
 
     /**
-     * Store a batch of log entries.
-     *
-     * @param logs list of validated log entries
-     * @return number of logs stored
+     * Retrieve all stored logs, ordered by most recent first.
      */
-    public int storeLogs(List<LogEntry> logs) {
-        logStore.saveAll(logs);
-        log.info("Stored {} log entries. Total in store: {}", logs.size(), logStore.size());
-        return logs.size();
+    public List<LogEntryEntity> getAllLogs() {
+        return logEntryRepository.findAllByOrderByCreatedAtDesc();
     }
 
     /**
-     * Retrieve all stored logs.
+     * Retrieve logs for a specific service, ordered by most recent first.
      */
-    public List<LogEntry> getAllLogs() {
-        return logStore.getAll();
+    public List<LogEntryEntity> getLogsByService(String service) {
+        return logEntryRepository.findByServiceOrderByCreatedAtDesc(service);
     }
 
     /**
-     * Retrieve logs for a specific service.
+     * Get total count of stored logs.
      */
-    public List<LogEntry> getLogsByService(String service) {
-        return logStore.getByService(service);
+    public long getLogCount() {
+        return logEntryRepository.count();
     }
 }
