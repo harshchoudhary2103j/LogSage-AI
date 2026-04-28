@@ -40,8 +40,14 @@ public class AnalysisResultEntity {
     private String fixSuggestion;
 
     /**
+     * Database ID of the original LogEntryEntity.
+     */
+    @Column(name = "log_id", nullable = false)
+    private Long logId;
+
+    /**
      * SHA-256 hash of the original log entry (service + timestamp + message).
-     * Links this result back to the log and enables idempotency checks.
+     * Enables O(1) idempotency checks before processing.
      */
     @Column(nullable = false)
     private String logHash;

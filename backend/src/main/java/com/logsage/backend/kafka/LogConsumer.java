@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.logsage.backend.config.KafkaTopicConfig;
 import com.logsage.backend.dto.LogEntry;
 import com.logsage.backend.dto.LogLevel;
-import com.logsage.backend.entity.LogEntryEntity;
-import com.logsage.backend.repository.LogEntryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -31,7 +29,6 @@ import org.springframework.stereotype.Component;
 public class LogConsumer {
 
     private final ObjectMapper objectMapper;
-    private final LogEntryRepository logEntryRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
 
     @KafkaListener(
@@ -52,17 +49,7 @@ public class LogConsumer {
         log.info("Consumed log from Kafka [service={}, level={}]",
                 entry.getService(), entry.getLevel());
 
-        // Step 2: Persist to PostgreSQL
-        LogEntryEntity entity = LogEntryEntity.builder()
-                .service(entry.getService())
-                .level(entry.getLevel())
-                .timestamp(entry.getTimestamp())
-                .message(entry.getMessage())
-                .build();
-
-        logEntryRepository.save(entity);
-
-        // Step 3: Forward ERROR logs to analysis-requests topic
+        // Step 2: Forward ERROR logs to analysis-requests topic
         if (entry.getLevel() == LogLevel.ERROR) {
             log.info("ERROR log detected — forwarding to analysis-requests [service={}]",
                     entry.getService());

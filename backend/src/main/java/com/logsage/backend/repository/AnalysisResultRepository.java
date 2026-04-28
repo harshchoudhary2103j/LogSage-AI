@@ -13,6 +13,8 @@ public interface AnalysisResultRepository extends JpaRepository<AnalysisResultEn
 
     List<AnalysisResultEntity> findByService(String service);
 
+    java.util.Optional<AnalysisResultEntity> findByLogId(Long logId);
+
     List<AnalysisResultEntity> findAllByOrderByAnalyzedAtDesc();
 
     List<AnalysisResultEntity> findByServiceOrderByAnalyzedAtDesc(String service);

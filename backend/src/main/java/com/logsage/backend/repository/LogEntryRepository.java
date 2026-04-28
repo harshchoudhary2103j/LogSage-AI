@@ -15,5 +15,7 @@ public interface LogEntryRepository extends JpaRepository<LogEntryEntity, Long> 
 
     List<LogEntryEntity> findAllByOrderByCreatedAtDesc();
 
+    List<LogEntryEntity> findByLevelOrderByCreatedAtDesc(com.logsage.backend.dto.LogLevel level);
+
     List<LogEntryEntity> findByServiceOrderByCreatedAtDesc(String service);
 }

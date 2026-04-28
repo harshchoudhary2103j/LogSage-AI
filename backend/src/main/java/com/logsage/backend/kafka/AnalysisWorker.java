@@ -83,6 +83,7 @@ public class AnalysisWorker {
                 .rootCause(response.rootCause())
                 .severity(response.severity())
                 .fixSuggestion(response.fixSuggestion())
+                .logId(entry.getId()) // Stage 4: Map back to the original log entry
                 .logHash(hash)
                 .analyzedAt(LocalDateTime.now())
                 .build();

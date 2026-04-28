@@ -16,6 +16,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class LogEntry {
 
+    private Long id; // DB generated ID
+
     @NotBlank(message = "Timestamp is required")
     private String timestamp;
 
