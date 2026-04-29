@@ -11,24 +11,33 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Custom Logback Appender that forwards ALL log events to the LogSage AI backend.
+ * Custom Logback Appender that forwards log events to the LogSage AI backend in batches.
  *
  * Design decisions:
- * - Uses Java 11+ HttpClient with a dedicated virtual thread executor → non-blocking, no Reactor dependency at Logback init time
- * - Filters out its own HTTP logs to prevent infinite feedback loops
- * - Wraps everything in try-catch so a LogSage outage NEVER crashes the service
- * - Reads service name, endpoint, and minimum level from logback-spring.xml <appender> properties
+ * - Uses a bounded ArrayBlockingQueue to safely batch logs in memory without OOM risks.
+ * - Flushes logs based on batch size OR a scheduled interval.
+ * - Uses Java 11+ HttpClient with a dedicated virtual thread executor.
+ * - Filters out its own HTTP/Kafka/Controller logs to prevent infinite feedback loops.
+ * - Wraps everything in try-catch so a LogSage outage NEVER crashes the service.
  */
 public class LogSageAppender extends AppenderBase<ILoggingEvent> {
 
     // ── Configurable from logback-spring.xml ──────────────────────────────────
     private String logsageUrl = "http://localhost:8081/api/logs";
     private String serviceName = "unknown-service";
+    private int batchSize = 50;
+    private int flushIntervalMs = 200;
 
     // ── Internal ──────────────────────────────────────────────────────────────
     private static final DateTimeFormatter ISO = DateTimeFormatter
@@ -36,8 +45,6 @@ public class LogSageAppender extends AppenderBase<ILoggingEvent> {
             .withZone(ZoneOffset.UTC);
 
     // Loggers that must be silenced to prevent infinite loops:
-    // (The HttpClient itself uses java.net.http which doesn't go through Logback, so this
-    //  mainly guards against any Logback internal logger calling append() recursively.)
     private static final Set<String> SUPPRESSED_LOGGERS = Set.of(
             "com.logsage.backend.logging.LogSageAppender",
             "com.logsage.backend.controller.LogController",
@@ -47,10 +54,18 @@ public class LogSageAppender extends AppenderBase<ILoggingEvent> {
             "io.netty"
     );
 
-    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    // Max capacity to prevent OutOfMemory if the downstream service is unavailable
+    private final BlockingQueue<String> logQueue = new ArrayBlockingQueue<>(10000);
+
+    // Single thread to periodically trigger flush
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+    // Virtual threads for actual HTTP execution (non-blocking, highly concurrent)
+    private final ExecutorService httpExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2))
-            .executor(executor)
+            .executor(httpExecutor)
             .build();
 
     // ── AppenderBase lifecycle ────────────────────────────────────────────────
@@ -58,13 +73,22 @@ public class LogSageAppender extends AppenderBase<ILoggingEvent> {
     @Override
     public void start() {
         super.start();
-        addInfo("LogSageAppender started → endpoint: " + logsageUrl + " | service: " + serviceName);
+        // Schedule periodic background flush
+        scheduler.scheduleAtFixedRate(this::flush, flushIntervalMs, flushIntervalMs, TimeUnit.MILLISECONDS);
+        addInfo("LogSageAppender started → endpoint: " + logsageUrl + " | service: " + serviceName + " | batchSize: " + batchSize);
     }
 
     @Override
     public void stop() {
+        // Shutdown scheduler first to prevent new flushes
+        scheduler.shutdown();
+        
+        // Final synchronous flush to ensure no logs are lost on shutdown
+        flush(); 
+        
+        // Shutdown HTTP executor
+        httpExecutor.shutdownNow();
         super.stop();
-        executor.shutdownNow();
     }
 
     // ── Core append logic ─────────────────────────────────────────────────────
@@ -85,17 +109,41 @@ public class LogSageAppender extends AppenderBase<ILoggingEvent> {
             return;
         }
 
-        // Build the payload string manually — no Jackson dependency required here
         String timestamp = ISO.format(Instant.ofEpochMilli(event.getTimeStamp()));
         String message = escape(event.getFormattedMessage());
 
-        String body = "[{\"service\":\"" + serviceName + "\"," +
+        // Create individual JSON object
+        String logObj = "{\"service\":\"" + serviceName + "\"," +
                 "\"level\":\"" + logSageLevel + "\"," +
                 "\"message\":\"" + message + "\"," +
-                "\"timestamp\":\"" + timestamp + "\"}]";
+                "\"timestamp\":\"" + timestamp + "\"}";
 
-        // Fire-and-forget via virtual thread — never blocks the logging thread
-        executor.submit(() -> sendToLogsage(body));
+        // Try to add to queue. If full, fail fast and drop (non-blocking)
+        if (!logQueue.offer(logObj)) {
+            return;
+        }
+
+        // If batch threshold is reached, trigger an async flush immediately
+        if (logQueue.size() >= batchSize) {
+            httpExecutor.submit(this::flush);
+        }
+    }
+
+    // ── Batch Flush ───────────────────────────────────────────────────────────
+
+    private void flush() {
+        List<String> batch = new ArrayList<>(batchSize);
+        // drainTo is thread-safe and atomic
+        logQueue.drainTo(batch, batchSize);
+
+        if (batch.isEmpty()) {
+            return;
+        }
+
+        String payload = "[" + String.join(",", batch) + "]";
+        
+        // Fire-and-forget HTTP request via virtual thread
+        httpExecutor.submit(() -> sendToLogsage(payload));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -155,5 +203,13 @@ public class LogSageAppender extends AppenderBase<ILoggingEvent> {
 
     public void setServiceName(String serviceName) {
         this.serviceName = serviceName;
+    }
+
+    public void setBatchSize(int batchSize) {
+        this.batchSize = batchSize;
+    }
+
+    public void setFlushIntervalMs(int flushIntervalMs) {
+        this.flushIntervalMs = flushIntervalMs;
     }
 }
