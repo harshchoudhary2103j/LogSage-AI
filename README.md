@@ -187,6 +187,57 @@ npm run dev
 # Opens at http://localhost:5173
 ```
 
+## 🔌 Microservice Integration
+
+LogSage is designed to work seamlessly across multiple microservices using a custom Logback appender.
+
+### 📦 Steps to Integrate with Any Spring Boot Service
+
+1. Copy the following files into your microservice:
+   - `LogSageAppender.java`
+   - `logback-spring.xml`
+
+2. Configure your `application.yml`:
+
+```yaml
+spring:
+  application:
+    name: payment-service   # unique per service
+
+logsage:
+  appender:
+    url: http://localhost:8081/api/logs
+```
+⚠️ Critical Configuration Note (Common Pitfall)
+
+Logback only forwards logs for specific package scopes.
+
+If your logback-spring.xml contains:
+
+<logger name="com.logsage" ...>
+
+👉 Then ONLY logs from com.logsage.* will be forwarded.
+
+To forward all your microservice logs, change the logger to:
+```
+<logger name="com.yourcompany" level="DEBUG" additivity="false">
+</logger>
+```
+
+✅ Solution
+
+Update the logger scope:
+
+```
+<logger name="com" level="DEBUG" additivity="false">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="LOGSAGE"/>
+</logger>
+```
+
+👉 This ensures ALL application logs from all services are captured.
+
+
 ### Environment Variables
 
 | Variable | Default | Description |
