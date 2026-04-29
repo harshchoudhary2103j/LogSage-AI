@@ -12,6 +12,11 @@ spring:
     username: ${POSTGRES_USER:logsage}
     password: ${POSTGRES_PASSWORD:logsage}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 25          # raised from default 10 to handle log ingestion bursts
+      connection-timeout: 10000      # 10s — fail fast instead of waiting 30s
+      idle-timeout: 300000           # 5 min idle before connection is closed
+      max-lifetime: 1200000          # 20 min max connection lifetime
 
   # JPA / Hibernate (Stage 3)
   jpa:
@@ -61,14 +66,11 @@ rate-limit:
   requests-per-window: ${RATE_LIMIT_REQUESTS:10}
   window-ms: ${RATE_LIMIT_WINDOW_MS:60000}
 
-# Logging
-logging:
-  level:
-    root: INFO
-    com.logsage: DEBUG
-    org.apache.kafka: WARN
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+# Logging (pattern is now fully managed by logback-spring.xml)
+# Override the LogSage appender endpoint if needed:
+logsage:
+  appender:
+    url: http://localhost:8081/api/logs
 
 # Async request timeout for Spring MVC
 spring.mvc.async.request-timeout: 35000

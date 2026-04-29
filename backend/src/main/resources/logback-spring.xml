@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!--
+        spring.application.name is read from application.yml at runtime.
+        springProperty makes it available as a Logback variable.
+    -->
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="unknown-service"/>
+    <springProperty scope="context" name="LOGSAGE_URL" source="logsage.appender.url" defaultValue="http://localhost:8081/api/logs"/>
+
+    <!-- ── Console Appender ─────────────────────────────────────────── -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{40} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ── LogSage Custom Appender ──────────────────────────────────── -->
+    <!--
+        CRITICAL: Only forward logs from YOUR application code (com.logsage.*).
+        Forwarding Spring / Kafka / Hibernate logs causes a feedback storm:
+        every POST to /api/logs triggers more Spring logs → more POSTs → pool exhaustion.
+
+        Architecture: root → CONSOLE only.
+                      com.logsage.* → CONSOLE + LOGSAGE (additivity=false keeps it isolated).
+        No extra JAR needed — this uses only built-in Logback constructs.
+    -->
+    <appender name="LOGSAGE" class="com.logsage.backend.logging.LogSageAppender">
+        <!-- serviceName is injected from spring.application.name at startup -->
+        <serviceName>${APP_NAME}</serviceName>
+
+        <!-- Target endpoint — override via logsage.appender.url in application.yml -->
+        <logsageUrl>${LOGSAGE_URL}</logsageUrl>
+    </appender>
+
+    <!-- ── Root Logger: Console ONLY ──────────────────────────────── -->
+    <!-- Framework logs (Spring, Kafka, Hibernate) stay here; never reach LOGSAGE -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!-- ── Your application code → Console + LogSage ──────────────── -->
+    <!--
+        additivity=false ensures com.logsage.* events do NOT bubble up to root,
+        so they are printed to console exactly once and sent to LOGSAGE once.
+    -->
+    <logger name="com.logsage" level="DEBUG" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="LOGSAGE"/>
+    </logger>
+
+    <!-- ── Framework noise suppression ──────────────────────────────── -->
+    <!-- Kafka / Spring Kafka: very verbose at DEBUG -->
+    <logger name="org.apache.kafka"           level="WARN"/>
+    <logger name="org.springframework.kafka"  level="WARN"/>
+
+    <!-- Hibernate / HikariCP -->
+    <logger name="org.hibernate"              level="WARN"/>
+    <logger name="com.zaxxer.hikari"          level="WARN"/>
+
+    <!-- Spring Web / MVC -->
+    <logger name="org.springframework"        level="INFO"/>
+    <logger name="io.netty"                   level="WARN"/>
+    <logger name="reactor.netty"              level="WARN"/>
+
+</configuration>

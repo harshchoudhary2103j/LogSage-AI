@@ -6,5 +6,6 @@ package com.logsage.backend.dto;
 public enum LogLevel {
     INFO,
     WARN,
-    ERROR
+    ERROR,
+    DEBUG
 }

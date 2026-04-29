@@ -1,111 +1,169 @@
 import React from 'react';
 
+const SEVERITY_STYLES = {
+  HIGH:   'text-rose-400  bg-rose-500/10  border-rose-500/30',
+  MEDIUM: 'text-amber-400 bg-amber-400/10 border-amber-400/30',
+  LOW:    'text-sky-400   bg-sky-500/10   border-sky-500/30',
+};
+
+function SectionLabel({ children }) {
+  return (
+    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5">
+      {children}
+    </p>
+  );
+}
+
+function InfoCard({ children, className = '' }) {
+  return (
+    <div className={`rounded-md border border-white/5 bg-white/[0.03] p-3.5 ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function EmptyState({ icon, title, body }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full px-8 py-16 text-center gap-4">
+      <div className="text-4xl opacity-30">{icon}</div>
+      <div>
+        <p className="text-sm font-semibold text-slate-300">{title}</p>
+        <p className="text-xs text-slate-600 mt-1 leading-relaxed">{body}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function AnalysisPanel({ log, analysis, isLoading }) {
+
+  /* ── Nothing selected ── */
   if (!log) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-500">
-        <svg className="w-16 h-16 mb-4 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
-        <h3 className="text-lg font-medium text-slate-300 mb-2">No Log Selected</h3>
-        <p className="text-sm">Click on any log entry to view its details and AI analysis.</p>
+      <div className="h-full">
+        <EmptyState
+          icon="↖"
+          title="No log selected"
+          body="Click any log entry in the stream to inspect it. ERROR logs will also show an AI incident report."
+        />
       </div>
     );
   }
 
+  /* ── Non-error log ── */
   if (log.level !== 'ERROR') {
+    const levelColors = {
+      INFO:  'border-sky-500/30   bg-sky-500/5   text-sky-300',
+      WARN:  'border-amber-400/30 bg-amber-400/5 text-amber-300',
+      DEBUG: 'border-slate-500/30 bg-slate-500/5 text-slate-300',
+    };
+    const cls = levelColors[log.level] ?? levelColors.DEBUG;
+
     return (
-      <div className="p-6">
-        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-6 mb-6">
-          <div className="flex items-start">
-            <svg className="w-6 h-6 text-blue-400 mr-3 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <div>
-              <h3 className="text-sm font-semibold text-blue-300 mb-1">Standard Log Entry</h3>
-              <p className="text-xs text-blue-400/80">AI Analysis is only triggered for ERROR-level logs to conserve resources.</p>
-            </div>
-          </div>
+      <div className="p-5 flex flex-col gap-4">
+        {/* Header */}
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-widest border ${cls}`}>
+            {log.level}
+          </span>
+          <span className="text-xs text-slate-500 font-medium">{log.service}</span>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Raw Message</h4>
-            <div className="bg-slate-950 border border-slate-800 rounded-md p-4 font-mono text-sm text-slate-300 whitespace-pre-wrap break-words">
-              {log.message}
-            </div>
-          </div>
+        {/* Message */}
+        <InfoCard>
+          <SectionLabel>Message</SectionLabel>
+          <p className="text-sm font-mono text-slate-300 leading-relaxed break-words">{log.message}</p>
+        </InfoCard>
+
+        {/* Timestamp */}
+        <InfoCard>
+          <SectionLabel>Timestamp</SectionLabel>
+          <p className="text-sm font-mono text-slate-400">{log.timestamp}</p>
+        </InfoCard>
+
+        {/* Info notice */}
+        <div className="flex gap-2.5 rounded-md bg-slate-800/50 border border-white/5 p-3">
+          <svg className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            AI analysis is only triggered for <span className="text-rose-400 font-semibold">ERROR</span>-level events. Select an error log to view the incident report.
+          </p>
         </div>
       </div>
     );
   }
 
+  /* ── ERROR log ── */
   return (
-    <div className="p-6">
-      <div className="mb-8">
-        <h2 className="text-xl font-bold text-white mb-2">AI Incident Report</h2>
-        <div className="flex items-center space-x-2">
-          <span className="text-xs font-medium text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded">{log.service}</span>
-          <span className="text-xs text-slate-500 font-mono">{log.timestamp}</span>
+    <div className="flex flex-col h-full">
+      {/* Panel header */}
+      <div className="px-5 py-3.5 border-b border-white/5 bg-rose-500/5 shrink-0">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+          <span className="text-[10px] font-bold uppercase tracking-widest text-rose-400">Incident Report</span>
         </div>
+        <p className="text-xs text-slate-500 font-medium truncate">{log.service}</p>
       </div>
 
-      <div className="mb-6">
-        <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Original Error</h4>
-        <div className="bg-rose-500/5 border border-rose-500/20 rounded-md p-4 font-mono text-xs text-rose-300/90 whitespace-pre-wrap break-words">
-          {log.message}
-        </div>
+      <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
+
+        {/* Error message */}
+        <InfoCard className="border-rose-500/15 bg-rose-500/[0.04]">
+          <SectionLabel>Error Message</SectionLabel>
+          <p className="text-xs font-mono text-rose-300/90 leading-relaxed break-words">{log.message}</p>
+        </InfoCard>
+
+        {/* AI content */}
+        {isLoading ? (
+          <div className="flex flex-col items-center gap-3 py-12">
+            <div className="w-6 h-6 rounded-full border-2 border-violet-500 border-t-transparent animate-spin" />
+            <p className="text-xs text-slate-500 animate-pulse">LogSage AI is analyzing…</p>
+          </div>
+        ) : analysis ? (
+          <div className="flex flex-col gap-4">
+
+            {/* Severity + Error Type */}
+            <div className="grid grid-cols-2 gap-3">
+              <InfoCard>
+                <SectionLabel>Severity</SectionLabel>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider border
+                  ${SEVERITY_STYLES[analysis.severity?.toUpperCase()] ?? SEVERITY_STYLES.LOW}`}>
+                  {analysis.severity}
+                </span>
+              </InfoCard>
+
+              <InfoCard>
+                <SectionLabel>Error Type</SectionLabel>
+                <p className="text-xs font-mono text-slate-300 leading-relaxed break-all">{analysis.errorType}</p>
+              </InfoCard>
+            </div>
+
+            {/* Root Cause */}
+            <InfoCard>
+              <SectionLabel>Root Cause</SectionLabel>
+              <p className="text-sm text-slate-300 leading-relaxed">{analysis.rootCause}</p>
+            </InfoCard>
+
+            {/* Fix Suggestion */}
+            <InfoCard className="border-emerald-500/20 bg-emerald-500/[0.04]">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <SectionLabel>Suggested Fix</SectionLabel>
+              </div>
+              <p className="text-sm text-emerald-200/80 leading-relaxed">{analysis.fixSuggestion}</p>
+            </InfoCard>
+
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-2 py-10 text-center">
+            <p className="text-sm text-slate-500">Analysis not yet available.</p>
+            <p className="text-xs text-slate-600">The worker may still be processing this event.</p>
+          </div>
+        )}
+
       </div>
-
-      {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-12">
-          <svg className="animate-spin h-8 w-8 text-indigo-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <p className="text-sm text-indigo-400 animate-pulse">LogSage AI is analyzing this error...</p>
-        </div>
-      ) : analysis ? (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          
-          <div className="flex justify-between items-center bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
-            <div>
-              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Severity</h4>
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border
-                ${analysis.severity === 'HIGH' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 
-                  analysis.severity === 'MEDIUM' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' : 
-                  'bg-blue-500/10 text-blue-400 border-blue-500/30'}`}
-              >
-                {analysis.severity}
-              </span>
-            </div>
-            
-            <div className="text-right">
-              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Error Type</h4>
-              <span className="font-mono text-sm text-slate-300">{analysis.errorType}</span>
-            </div>
-          </div>
-          
-          <div>
-            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Root Cause Analysis</h4>
-            <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700/50 text-slate-300 text-sm leading-relaxed">
-              {analysis.rootCause}
-            </div>
-          </div>
-          
-          <div>
-            <h4 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-2 flex items-center">
-              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-              Suggested Fix
-            </h4>
-            <div className="bg-emerald-500/10 rounded-lg p-4 border border-emerald-500/20 text-emerald-100/90 text-sm leading-relaxed">
-              {analysis.fixSuggestion}
-            </div>
-          </div>
-
-        </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center py-12 text-slate-500">
-          <svg className="w-12 h-12 mb-3 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-          <p className="text-sm">Analysis pending or unavailable.</p>
-        </div>
-      )}
     </div>
   );
 }
