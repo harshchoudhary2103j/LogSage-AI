@@ -321,6 +321,24 @@ LogSage AI/
 ```
 
 ---
+## 📸 Screenshots
+
+### 🖥️ Dashboard
+![Dashboard](docs/images/dashboard.png)
+
+---
+
+### 🤖 AI Analysis
+![Analysis](docs/images/analysis.png)
+
+---
+
+---
+
+### 📊 Kafka UI
+![Kafka](docs/images/kafbat-ui.png)
+
+---
 
 ## 📄 License
 
